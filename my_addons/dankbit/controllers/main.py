@@ -1,16 +1,13 @@
-import gzip
-import base64
 import numpy as np
 import time
 from datetime import datetime, timezone, timedelta
 from io import BytesIO
 import logging
-from odoo import fields, http
+from odoo import http
 from odoo.http import request
 from . import options
 from . import delta
 from . import gamma
-from . import oi
 from zoneinfo import ZoneInfo
 import matplotlib.pyplot as plt
 
@@ -30,12 +27,6 @@ _CACHE_TTL = 120  # in seconds
 ETH_DEFAULT_FROM = 1000.0
 ETH_DEFAULT_TO = 6000.0
 ETH_DEFAULT_STEPS = 10
-
-ETH_ZONE_FROM = 1000.0
-ETH_ZONE_TO = 6000.0
-
-# For OI view: add small margin around main range
-ETH_OI_BUCKET = 25  # OI strikes bucket size (25 USD)
 
 
 class ChartController(http.Controller):
@@ -78,17 +69,16 @@ class ChartController(http.Controller):
     # ============================
     @http.route([
         "/<string:instrument>/c",
-        "/<string:instrument>/c/<int:from_hour>",
+        "/<string:instrument>/c/<int:minutes_ago>",
     ], type="http", auth="public", website=True)
-    def chart_png_calls(self, instrument, from_hour=0):
-        plot_title = "calls"
+    def chart_png_calls(self, instrument, minutes_ago=0):
+        plot_title = "taker calls"
         icp = request.env['ir.config_parameter'].sudo()
 
         day_from_price = float(icp.get_param("dankbit.from_price", default=ETH_DEFAULT_FROM))
         day_to_price = float(icp.get_param("dankbit.to_price", default=ETH_DEFAULT_TO))
         steps = int(icp.get_param("dankbit.steps", default=ETH_DEFAULT_STEPS))
         refresh_interval = int(icp.get_param("dankbit.refresh_interval", default=60))
-        show_red_line = icp.get_param("dankbit.show_red_line")
         last_hedging_time = icp.get_param("dankbit.last_hedging_time")
         mock_0dte = icp.get_param('dankbit.mock_0dte')
         start_from_ts = int(icp.get_param("dankbit.from_days_ago"))
@@ -97,15 +87,16 @@ class ChartController(http.Controller):
         if last_hedging_time:
             start_ts = last_hedging_time
 
-        if from_hour:
-            start_ts = self.get_ts_from_hour(from_hour)
-            plot_title = f"{plot_title} from {str(from_hour)}:00 UTC"
+        if minutes_ago:
+            start_ts = datetime.now() - timedelta(minutes=minutes_ago)
+            plot_title = f"{plot_title} from {str(minutes_ago)} minutes ago"
 
         trades = request.env['dankbit.trade'].sudo().search(
             domain=[
                 ("name", "ilike", f"{instrument}"),
                 ("option_type", "=", "call"),
                 ("deribit_ts", ">=", start_ts),
+                ("is_block_trade", "=", False),
             ]
         )
 
@@ -131,8 +122,7 @@ class ChartController(http.Controller):
         market_deltas = delta.portfolio_delta(STs, trades, 0.05, mock_0dte)
         market_gammas = gamma.portfolio_gamma(STs, trades, 0.05, mock_0dte)
 
-        fig, ax = obj.plot(index_price, market_deltas, market_gammas,
-                           "taker", show_red_line, strike=plot_title)
+        fig, ax = obj.plot(index_price, market_deltas, market_gammas, "taker", plot_title)
 
         ax.text(
             0.01, 0.02,
@@ -146,33 +136,29 @@ class ChartController(http.Controller):
         plt.close(fig)
 
         png_data = buf.getvalue()
-        compressed_data = gzip.compress(png_data)
 
         headers = [
             ("Content-Type", "image/png"),
             ("Cache-Control", "no-cache"),
-            ("Content-Encoding", "gzip"),
             ("Content-Disposition", f'inline; filename="{instrument}_calls.png"'),
             ("Refresh", refresh_interval),
         ]
-        return request.make_response(compressed_data, headers=headers)
-
+        return request.make_response(png_data, headers=headers)
     # ============================
     # PUTS
     # ============================
     @http.route([
         "/<string:instrument>/p",
-        "/<string:instrument>/p/<int:from_hour>",
+        "/<string:instrument>/p/<int:minutes_ago>",
     ], type="http", auth="public", website=True)
-    def chart_png_puts(self, instrument, from_hour=0):
-        plot_title = "puts"
+    def chart_png_puts(self, instrument, minutes_ago=0):
+        plot_title = "taker puts"
         icp = request.env['ir.config_parameter'].sudo()
 
         day_from_price = float(icp.get_param("dankbit.from_price", default=ETH_DEFAULT_FROM))
         day_to_price = float(icp.get_param("dankbit.to_price", default=ETH_DEFAULT_TO))
         steps = int(icp.get_param("dankbit.steps", default=ETH_DEFAULT_STEPS))
         refresh_interval = int(icp.get_param("dankbit.refresh_interval", default=60))
-        show_red_line = icp.get_param("dankbit.show_red_line")
         last_hedging_time = icp.get_param("dankbit.last_hedging_time")
         mock_0dte = icp.get_param('dankbit.mock_0dte')
         start_from_ts = int(icp.get_param("dankbit.from_days_ago"))
@@ -181,15 +167,16 @@ class ChartController(http.Controller):
         if last_hedging_time:
             start_ts = last_hedging_time
 
-        if from_hour:
-            start_ts = self.get_ts_from_hour(from_hour)
-            plot_title = f"{plot_title} from {str(from_hour)}:00 UTC"
+        if minutes_ago:
+            start_ts = datetime.now() - timedelta(minutes=minutes_ago)
+            plot_title = f"{plot_title} from {str(minutes_ago)} minutes ago"
 
         trades = request.env['dankbit.trade'].sudo().search(
             domain=[
                 ("name", "ilike", f"{instrument}"),
                 ("option_type", "=", "put"),
                 ("deribit_ts", ">=", start_ts),
+                ("is_block_trade", "=", False),
             ]
         )
 
@@ -215,8 +202,7 @@ class ChartController(http.Controller):
         market_deltas = delta.portfolio_delta(STs, trades, 0.05, mock_0dte)
         market_gammas = gamma.portfolio_gamma(STs, trades, 0.05, mock_0dte)
 
-        fig, ax = obj.plot(index_price, market_deltas, market_gammas,
-                           "taker", show_red_line, strike=plot_title)
+        fig, ax = obj.plot(index_price, market_deltas, market_gammas, "taker", plot_title)
 
         ax.text(
             0.01, 0.02,
@@ -230,33 +216,30 @@ class ChartController(http.Controller):
         plt.close(fig)
 
         png_data = buf.getvalue()
-        compressed_data = gzip.compress(png_data)
 
         headers = [
             ("Content-Type", "image/png"),
             ("Cache-Control", "no-cache"),
-            ("Content-Encoding", "gzip"),
             ("Content-Disposition", f'inline; filename="{instrument}_puts.png"'),
             ("Refresh", refresh_interval),
         ]
-        return request.make_response(compressed_data, headers=headers)
+        return request.make_response(png_data, headers=headers)
 
     # ============================
     # BUYS
     # ============================
     @http.route([
         "/<string:instrument>/b",
-        "/<string:instrument>/b/<int:from_hour>",
+        "/<string:instrument>/b/<int:minutes_ago>",
     ], type="http", auth="public", website=True)
-    def chart_png_buys(self, instrument, from_hour=0):
-        plot_title = "buys"
+    def chart_png_buys(self, instrument, minutes_ago=0):
+        plot_title = "taker buys"
         icp = request.env['ir.config_parameter'].sudo()
 
         day_from_price = float(icp.get_param("dankbit.from_price", default=ETH_DEFAULT_FROM))
         day_to_price = float(icp.get_param("dankbit.to_price", default=ETH_DEFAULT_TO))
         steps = int(icp.get_param("dankbit.steps", default=ETH_DEFAULT_STEPS))
         refresh_interval = int(icp.get_param("dankbit.refresh_interval", default=60))
-        show_red_line = icp.get_param("dankbit.show_red_line")
         last_hedging_time = icp.get_param("dankbit.last_hedging_time")
         mock_0dte = icp.get_param('dankbit.mock_0dte')
         start_from_ts = int(icp.get_param("dankbit.from_days_ago"))
@@ -265,15 +248,16 @@ class ChartController(http.Controller):
         if last_hedging_time:
             start_ts = last_hedging_time
 
-        if from_hour:
-            start_ts = self.get_ts_from_hour(from_hour)
-            plot_title = f"{plot_title} from {str(from_hour)}:00 UTC"
+        if minutes_ago:
+            start_ts = datetime.now() - timedelta(minutes=minutes_ago)
+            plot_title = f"{plot_title} from {str(minutes_ago)} minutes ago"
 
         trades = request.env['dankbit.trade'].sudo().search(
             domain=[
                 ("name", "ilike", f"{instrument}"),
                 ("direction", "=", "buy"),
                 ("deribit_ts", ">=", start_ts),
+                ("is_block_trade", "=", False),
             ]
         )
 
@@ -299,8 +283,7 @@ class ChartController(http.Controller):
         market_deltas = delta.portfolio_delta(STs, trades, 0.05, mock_0dte)
         market_gammas = gamma.portfolio_gamma(STs, trades, 0.05, mock_0dte)
 
-        fig, ax = obj.plot(index_price, market_deltas, market_gammas,
-                           "taker", show_red_line, strike=plot_title)
+        fig, ax = obj.plot(index_price, market_deltas, market_gammas, "taker", plot_title)
 
         ax.text(
             0.01, 0.02,
@@ -314,33 +297,30 @@ class ChartController(http.Controller):
         plt.close(fig)
 
         png_data = buf.getvalue()
-        compressed_data = gzip.compress(png_data)
 
         headers = [
             ("Content-Type", "image/png"),
             ("Cache-Control", "no-cache"),
-            ("Content-Encoding", "gzip"),
             ("Content-Disposition", f'inline; filename="{instrument}_buys.png"'),
             ("Refresh", refresh_interval),
         ]
-        return request.make_response(compressed_data, headers=headers)
+        return request.make_response(png_data, headers=headers)
 
     # ============================
     # SELLS
     # ============================
     @http.route([
         "/<string:instrument>/s",
-        "/<string:instrument>/s/<int:from_hour>",
+        "/<string:instrument>/s/<int:minutes_ago>",
     ], type="http", auth="public", website=True)
-    def chart_png_sells(self, instrument, from_hour=0):
-        plot_title = "sells"
+    def chart_png_sells(self, instrument, minutes_ago=0):
+        plot_title = "taker sells"
         icp = request.env['ir.config_parameter'].sudo()
 
         day_from_price = float(icp.get_param("dankbit.from_price", default=ETH_DEFAULT_FROM))
         day_to_price = float(icp.get_param("dankbit.to_price", default=ETH_DEFAULT_TO))
         steps = int(icp.get_param("dankbit.steps", default=ETH_DEFAULT_STEPS))
         refresh_interval = int(icp.get_param("dankbit.refresh_interval", default=60))
-        show_red_line = icp.get_param("dankbit.show_red_line")
         last_hedging_time = icp.get_param("dankbit.last_hedging_time")
         mock_0dte = icp.get_param('dankbit.mock_0dte')
         start_from_ts = int(icp.get_param("dankbit.from_days_ago"))
@@ -349,15 +329,16 @@ class ChartController(http.Controller):
         if last_hedging_time:
             start_ts = last_hedging_time
 
-        if from_hour:
-            start_ts = self.get_ts_from_hour(from_hour)
-            plot_title = f"{plot_title} from {str(from_hour)}:00 UTC"
+        if minutes_ago:
+            start_ts = datetime.now() - timedelta(minutes=minutes_ago)
+            plot_title = f"{plot_title} from {str(minutes_ago)} minutes ago"
 
         trades = request.env['dankbit.trade'].sudo().search(
             domain=[
                 ("name", "ilike", f"{instrument}"),
                 ("direction", "=", "sell"),
                 ("deribit_ts", ">=", start_ts),
+                ("is_block_trade", "=", False),
             ]
         )
 
@@ -383,8 +364,7 @@ class ChartController(http.Controller):
         market_deltas = delta.portfolio_delta(STs, trades, 0.05, mock_0dte)
         market_gammas = gamma.portfolio_gamma(STs, trades, 0.05, mock_0dte)
 
-        fig, ax = obj.plot(index_price, market_deltas, market_gammas,
-                           "taker", show_red_line, strike=plot_title)
+        fig, ax = obj.plot(index_price, market_deltas, market_gammas, "taker", plot_title)
 
         ax.text(
             0.01, 0.02,
@@ -398,98 +378,23 @@ class ChartController(http.Controller):
         plt.close(fig)
 
         png_data = buf.getvalue()
-        compressed_data = gzip.compress(png_data)
-
+    
         headers = [
             ("Content-Type", "image/png"),
             ("Cache-Control", "no-cache"),
-            ("Content-Encoding", "gzip"),
             ("Content-Disposition", f'inline; filename="{instrument}_sells.png"'),
             ("Refresh", refresh_interval),
         ]
-        return request.make_response(compressed_data, headers=headers)
-
-    # ============================
-    # SINGLE STRIKE MMV
-    # ============================
-    @http.route("/<string:instrument>/strike/<int:strike>", type="http", auth="public", website=True)
-    def chart_png_strike(self, instrument, strike):
-        icp = request.env['ir.config_parameter'].sudo()
-
-        day_from_price = float(icp.get_param("dankbit.from_price", default=ETH_DEFAULT_FROM))
-        day_to_price = float(icp.get_param("dankbit.to_price", default=ETH_DEFAULT_TO))
-        steps = int(icp.get_param("dankbit.steps", default=ETH_DEFAULT_STEPS))
-        refresh_interval = int(icp.get_param("dankbit.refresh_interval", default=60))
-        show_red_line = icp.get_param("dankbit.show_red_line")
-        last_hedging_time = icp.get_param("dankbit.last_hedging_time")
-        start_from_ts = int(icp.get_param("dankbit.from_days_ago"))
-        start_ts = self.get_midnight_ts(days_offset=start_from_ts)
-
-        if last_hedging_time:
-            start_ts = last_hedging_time
-
-        trades = request.env['dankbit.trade'].sudo().search(
-            domain=[
-                ("name", "ilike", f"{instrument}"),
-                ("strike", "=", int(strike)),
-                ("deribit_ts", ">=", start_ts),
-            ]
-        )
-
-        now = time.time()
-        if _INDEX_CACHE["price"] and (now - _INDEX_CACHE["timestamp"] < _CACHE_TTL):
-            index_price = _INDEX_CACHE["price"]
-        else:
-            index_price = request.env['dankbit.trade'].sudo().get_index_price()
-            _INDEX_CACHE["price"] = index_price
-            _INDEX_CACHE["timestamp"] = now
-
-        obj = options.OptionStrat(instrument, index_price, day_from_price, day_to_price, steps)
-
-        for trade in trades:
-            if trade.option_type == "call":
-                if trade.direction == "buy":
-                    obj.long_call(trade.strike, trade.price * trade.index_price)
-                elif trade.direction == "sell":
-                    obj.short_call(trade.strike, trade.price * trade.index_price)
-            elif trade.option_type == "put":
-                if trade.direction == "buy":
-                    obj.long_put(trade.strike, trade.price * trade.index_price)
-                elif trade.direction == "sell":
-                    obj.short_put(trade.strike, trade.price * trade.index_price)
-
-        STs = np.arange(day_from_price, day_to_price, steps)
-        market_deltas = delta.portfolio_delta(STs, trades, 0.05)
-        market_gammas = gamma.portfolio_gamma(STs, trades, 0.05)
-
-        fig, ax = obj.plot(index_price, market_deltas, market_gammas,
-                           "mm", show_red_line, strike=int(strike))
-
-        buf = BytesIO()
-        fig.savefig(buf, format="png")
-        plt.close(fig)
-
-        png_data = buf.getvalue()
-        compressed_data = gzip.compress(png_data)
-
-        headers = [
-            ("Content-Type", "image/png"),
-            ("Cache-Control", "no-cache"),
-            ("Content-Encoding", "gzip"),
-            ("Content-Disposition", f'inline; filename="{instrument}_{strike}.png"'),
-            ("Refresh", refresh_interval),
-        ]
-        return request.make_response(compressed_data, headers=headers)
+        return request.make_response(png_data, headers=headers)
 
     # ============================
     # DAY VIEW: MMV / TV / etc.
     # ============================
     @http.route([
         "/<string:instrument>/<string:view_type>",
-        "/<string:instrument>/<string:view_type>/<int:hours_ago>",
-        "/<string:instrument>/<string:view_type>/<string:take_screenshot>"
+        "/<string:instrument>/<string:view_type>/<int:minutes_ago>",
     ], type="http", auth="public", website=True)
-    def chart_png_day(self, instrument, view_type, hours_ago=0, take_screenshot=None):
+    def chart_png_day(self, instrument, view_type, minutes_ago=0):
         # keep original for filename
         original_view_type = view_type
         plot_title = f"{original_view_type}"
@@ -500,7 +405,6 @@ class ChartController(http.Controller):
         day_to_price = float(icp.get_param("dankbit.to_price", default=ETH_DEFAULT_TO))
         steps = int(icp.get_param("dankbit.steps", default=ETH_DEFAULT_STEPS))
         refresh_interval = int(icp.get_param("dankbit.refresh_interval", default=60))
-        show_red_line = icp.get_param("dankbit.show_red_line")
         last_hedging_time = icp.get_param("dankbit.last_hedging_time")
         mock_0dte = icp.get_param('dankbit.mock_0dte')
         start_from_ts = int(icp.get_param("dankbit.from_days_ago"))
@@ -509,9 +413,9 @@ class ChartController(http.Controller):
         if last_hedging_time:
             start_ts = last_hedging_time
 
-        if hours_ago:
-            start_ts = datetime.now() - timedelta(hours=hours_ago)
-            plot_title = f"{plot_title} from {str(hours_ago)} hour(s) ago"
+        if minutes_ago:
+            start_ts = datetime.now() - timedelta(minutes=minutes_ago)
+            plot_title = f"{plot_title} from {str(minutes_ago)} minutes ago"
         else:
             plot_title = f"{plot_title} today"
 
@@ -519,6 +423,7 @@ class ChartController(http.Controller):
             domain=[
                 ("name", "ilike", f"{instrument}"),
                 ("deribit_ts", ">=", start_ts),
+                ("is_block_trade", "=", False),
             ]
         )
 
@@ -565,8 +470,7 @@ class ChartController(http.Controller):
 
         # IMPORTANT: do NOT pass string strike here,
         # so options.OptionStrat.plot keeps view_type logic intact.
-        fig, ax = obj.plot(index_price, market_deltas, market_gammas,
-                           internal_view_type, show_red_line, strike=plot_title)
+        fig, ax = obj.plot(index_price, market_deltas, market_gammas, internal_view_type, plot_title)
 
         ax.text(
             0.01, 0.02,
@@ -580,26 +484,16 @@ class ChartController(http.Controller):
         plt.close(fig)
         buf.seek(0)
 
-        if take_screenshot and take_screenshot in ["y", "Y"]:
-            request.env["dankbit.screenshot"].sudo().create({
-                "name": instrument,
-                "timestamp": fields.Datetime.now(),
-                "image_png": base64.b64encode(buf.read()),
-            })
-
         png_data = buf.getvalue()
-        compressed_data = gzip.compress(png_data)
 
         headers = [
             ("Content-Type", "image/png"),
             ("Cache-Control", "no-cache"),
-            ("Content-Encoding", "gzip"),
             ("Content-Disposition",
-             f'inline; filename="{instrument}_{original_view_type}_{hours_ago}_day.png"'),
+             f'inline; filename="{instrument}_{original_view_type}_{minutes_ago}_minutes.png"'),
             ("Refresh", refresh_interval),
         ]
-        return request.make_response(compressed_data, headers=headers)
-
+        return request.make_response(png_data, headers=headers)
     # ============================
     # ALL TRADES VIEW
     # ============================
@@ -614,11 +508,11 @@ class ChartController(http.Controller):
         steps = int(icp.get_param("dankbit.steps", default=ETH_DEFAULT_STEPS))
         refresh_interval = int(icp.get_param("dankbit.refresh_interval", default=60))
         mock_0dte = icp.get_param('dankbit.mock_0dte')
-        show_red_line = icp.get_param("dankbit.show_red_line")
 
         trades = request.env['dankbit.trade'].sudo().search(
             domain=[
                 ("name", "ilike", f"{instrument}"),
+                ("is_block_trade", "=", False),
             ]
         )
 
@@ -662,8 +556,7 @@ class ChartController(http.Controller):
         else:
             internal_view_type = original_view_type
 
-        fig, ax = obj.plot(index_price, market_deltas, market_gammas,
-                           internal_view_type, show_red_line, strike=plot_title)
+        fig, ax = obj.plot(index_price, market_deltas, market_gammas, internal_view_type, plot_title)
 
         ax.text(
             0.01, 0.02,
@@ -678,337 +571,12 @@ class ChartController(http.Controller):
         buf.seek(0)
 
         png_data = buf.getvalue()
-        compressed_data = gzip.compress(png_data)
 
         headers = [
             ("Content-Type", "image/png"),
             ("Cache-Control", "no-cache"),
-            ("Content-Encoding", "gzip"),
             ("Content-Disposition",
              f'inline; filename="{instrument}_{original_view_type}_all.png"'),
             ("Refresh", refresh_interval * 5),
         ]
-        return request.make_response(compressed_data, headers=headers)
-
-    # ============================
-    # ZONES VIEW
-    # ============================
-    @http.route("/<string:instrument>/zones", type="http", auth="public", website=True)
-    def chart_png_zones(self, instrument):
-        icp = request.env['ir.config_parameter'].sudo()
-
-        zone_from_price = float(icp.get_param("dankbit.zone_from_price", default=ETH_ZONE_FROM))
-        zone_to_price = float(icp.get_param("dankbit.zone_to_price", default=ETH_ZONE_TO))
-        steps = int(icp.get_param("dankbit.steps", default=ETH_DEFAULT_STEPS))
-        refresh_interval = int(icp.get_param("dankbit.refresh_interval", default=60))
-        last_hedging_time = icp.get_param("dankbit.last_hedging_time")
-        start_from_ts = int(icp.get_param("dankbit.from_days_ago"))
-        start_ts = self.get_midnight_ts(days_offset=start_from_ts)
-
-        if last_hedging_time:
-            start_ts = last_hedging_time
-
-        long_trades = request.env['dankbit.trade'].sudo().search(
-            domain=[
-                ("direction", "=", "buy"),
-                ("name", "ilike", f"{instrument}"),
-                ("deribit_ts", ">=", start_ts),
-            ]
-        )
-
-        short_trades = request.env['dankbit.trade'].sudo().search(
-            domain=[
-                ("direction", "=", "sell"),
-                ("name", "ilike", f"{instrument}"),
-                ("deribit_ts", ">=", start_ts),
-            ]
-        )
-
-        # index_price = request.env['dankbit.trade'].sudo().get_index_price()
-        index_price = 0
-        now = time.time()
-        if _INDEX_CACHE["price"] and (now - _INDEX_CACHE["timestamp"] < _CACHE_TTL):
-            index_price = _INDEX_CACHE["price"]
-        else:
-            index_price = request.env['dankbit.trade'].sudo().get_index_price()
-            _INDEX_CACHE["price"] = index_price
-            _INDEX_CACHE["timestamp"] = now
-
-        obj = options.OptionStrat(instrument, index_price, zone_from_price, zone_to_price, steps)
-
-        for trade in long_trades:
-            if trade.option_type == "call":
-                obj.add_call_to_longs(trade.strike, trade.price * trade.index_price)
-            elif trade.option_type == "put":
-                obj.add_put_to_longs(trade.strike, trade.price * trade.index_price)
-
-        for trade in short_trades:
-            if trade.option_type == "call":
-                obj.add_call_to_shorts(trade.strike, trade.price * trade.index_price)
-            elif trade.option_type == "put":
-                obj.add_put_to_shorts(trade.strike, trade.price * trade.index_price)
-
-        fig, ax = obj.plot_zones(index_price)
-
-        ax.text(
-            0.01, 0.02,
-            f"{len(long_trades)} longs - {len(short_trades)} shorts",
-            transform=ax.transAxes,
-            fontsize=14,
-        )
-
-        buf = BytesIO()
-        fig.savefig(buf, format="png")
-        plt.close(fig)
-
-        png_data = buf.getvalue()
-        compressed_data = gzip.compress(png_data)
-
-        headers = [
-            ("Content-Type", "image/png"),
-            ("Cache-Control", "no-cache"),
-            ("Content-Encoding", "gzip"),
-            ("Content-Disposition", f'inline; filename="{instrument}_zones.png"'),
-            ("Refresh", refresh_interval),
-        ]
-        return request.make_response(compressed_data, headers=headers)
-
-    # ============================
-    # OI VIEW
-    # ============================
-    @http.route([
-        "/<string:instrument>/oi",
-        "/<string:instrument>/oi/<int:from_hour>",
-    ], type="http", auth="public", website=True)
-    def chart_png_oi(self, instrument, from_hour=0):
-        plot_title = "OI"
-        icp = request.env['ir.config_parameter'].sudo()
-
-        # add smaller ETH-style margin
-        day_from_price = float(icp.get_param("dankbit.from_price", default=ETH_DEFAULT_FROM))
-        day_to_price = float(icp.get_param("dankbit.to_price", default=ETH_DEFAULT_TO))
-
-        steps = int(icp.get_param("dankbit.steps", default=ETH_DEFAULT_STEPS))
-        refresh_interval = int(icp.get_param("dankbit.refresh_interval", default=60))
-        last_hedging_time = icp.get_param("dankbit.last_hedging_time")
-        start_from_ts = int(icp.get_param("dankbit.from_days_ago"))
-        start_ts = self.get_midnight_ts(days_offset=start_from_ts)
-
-        if last_hedging_time:
-            start_ts = last_hedging_time
-
-        if from_hour:
-            start_ts = self.get_ts_from_hour(from_hour)
-            plot_title = f"{plot_title} from {str(from_hour)}:00 UTC"
-
-        oi_data = []
-        for strike in range(int(day_from_price), int(day_to_price), ETH_OI_BUCKET):
-            trades = request.env['dankbit.trade'].sudo().search(
-                domain=[
-                    ("name", "ilike", f"{instrument}"),
-                    ("strike", "=", strike),
-                    ("deribit_ts", ">=", start_ts),
-                ]
-            )
-            oi_call, oi_put = oi.calculate_oi(strike, trades)
-            oi_data.append([strike, oi_call, oi_put])
-
-        # index_price = request.env['dankbit.trade'].sudo().get_index_price()
-        index_price = 0
-        now = time.time()
-        if _INDEX_CACHE["price"] and (now - _INDEX_CACHE["timestamp"] < _CACHE_TTL):
-            index_price = _INDEX_CACHE["price"]
-        else:
-            index_price = request.env['dankbit.trade'].sudo().get_index_price()
-            _INDEX_CACHE["price"] = index_price
-            _INDEX_CACHE["timestamp"] = now
-
-        obj = options.OptionStrat(instrument, index_price, day_from_price, day_to_price, steps)
-
-        fig = obj.plot_oi(index_price, oi_data, plot_title)
-
-        buf = BytesIO()
-        fig.savefig(buf, format="png")
-        plt.close(fig)
-
-        png_data = buf.getvalue()
-        compressed_data = gzip.compress(png_data)
-
-        headers = [
-            ("Content-Type", "image/png"),
-            ("Cache-Control", "no-cache"),
-            ("Content-Encoding", "gzip"),
-            ("Content-Disposition", f'inline; filename="{instrument}_oi.png"'),
-            ("Refresh", refresh_interval),
-        ]
-        return request.make_response(compressed_data, headers=headers)
-
-    # ============================
-    # STS STRIKE SCROLLER
-    # ============================
-    @http.route("/<string:instrument>/sts", type="http", auth="public")
-    def plot_scrollable_strikes_auto(self, instrument):
-        """
-        Fullscreen strike viewer — supports:
-        - Mouse wheel
-        - Keyboard arrows
-        - Touch swipe (left/right or up/down)
-        """
-        env = request.env
-        icp = env['ir.config_parameter'].sudo()
-        Trade = env["dankbit.trade"].sudo()
-        start_from_ts = int(icp.get_param("dankbit.from_days_ago"))
-        start_ts = self.get_midnight_ts(days_offset=start_from_ts)
-
-        strikes = sorted(set(Trade.search([
-            ("name", "ilike", instrument),
-            ("deribit_ts", ">=", start_ts),
-        ]).mapped("strike")))
-
-        if not strikes:
-            return f"<h3>No strikes found for {instrument}</h3>"
-
-        # Cache and index price
-        now = time.time()
-        if _INDEX_CACHE["price"] and (now - _INDEX_CACHE["timestamp"] < _CACHE_TTL):
-            index_price = _INDEX_CACHE["price"]
-        else:
-            index_price = Trade.get_index_price()
-            _INDEX_CACHE["price"] = index_price
-            _INDEX_CACHE["timestamp"] = now
-
-        # Find starting strike (lowest below index)
-        lower_strikes = [s for s in strikes if s <= index_price]
-        start_strike = max(lower_strikes) if lower_strikes else strikes[0]
-        start_index = strikes.index(start_strike)
-        img_urls = [f"/{instrument}/strike/{s}" for s in strikes]
-
-        html = f"""
-        <html>
-            <head>
-                <title>{instrument} Strike Viewer (start {start_strike})</title>
-                <style>
-                    html, body {{
-                        margin: 0;
-                        padding: 0;
-                        height: 100%;
-                        width: 100%;
-                        background-color: #e6e6e6;
-                        overflow: hidden;
-                        font-family: Arial, sans-serif;
-                        color: #333;
-                        -webkit-user-select: none;
-                        -ms-user-select: none;
-                        user-select: none;
-                        touch-action: pan-y pinch-zoom;
-                    }}
-                    .viewer {{
-                        position: relative;
-                        width: 100%;
-                        height: 100%;
-                        display: flex;
-                        align-items: center;
-                        justify-content: center;
-                        overflow: hidden;
-                    }}
-                    .viewer img {{
-                        max-width: 100%;
-                        max-height: 100%;
-                        object-fit: contain;
-                        border: none;
-                        transition: opacity 0.25s ease-in-out;
-                        touch-action: none;
-                    }}
-                    .label {{
-                        position: absolute;
-                        top: 10px;
-                        left: 50%;
-                        transform: translateX(-50%);
-                        background: rgba(255,255,255,0.8);
-                        padding: 6px 14px;
-                        border-radius: 6px;
-                        font-weight: bold;
-                        font-size: 18px;
-                    }}
-                    .help {{
-                        position: absolute;
-                        bottom: 10px;
-                        left: 50%;
-                        transform: translateX(-50%);
-                        font-size: 14px;
-                        color: #444;
-                        opacity: 0.7;
-                        background: rgba(255,255,255,0.5);
-                        padding: 4px 8px;
-                        border-radius: 4px;
-                    }}
-                </style>
-            </head>
-            <body>
-                <div class="viewer">
-                    <img id="strikeImage" src="{img_urls[start_index]}" alt="strike image" />
-                    <div class="label" id="strikeLabel">{strikes[start_index]}</div>
-                    <div class="help">Swipe ◀▶ or scroll ↑↓ or use ← → keys</div>
-                </div>
-
-                <script>
-                    const strikes = {strikes};
-                    const urls = {img_urls};
-                    let index = {start_index};
-                    const img = document.getElementById('strikeImage');
-                    const label = document.getElementById('strikeLabel');
-
-                    function showStrike(newIndex) {{
-                        if (newIndex < 0) newIndex = urls.length - 1;
-                        if (newIndex >= urls.length) newIndex = 0;
-                        img.style.opacity = 0;
-                        setTimeout(() => {{
-                            img.src = urls[newIndex];
-                            label.textContent = strikes[newIndex];
-                            img.style.opacity = 1;
-                            index = newIndex;
-                        }}, 150);
-                    }}
-
-                    window.addEventListener('wheel', (e) => {{
-                        if (e.deltaY < 0) showStrike(index + 1);
-                        else if (e.deltaY > 0) showStrike(index - 1);
-                    }}, {{ passive: true }});
-
-                    window.addEventListener('keydown', (e) => {{
-                        if (['ArrowRight', 'ArrowUp'].includes(e.key)) showStrike(index + 1);
-                        if (['ArrowLeft', 'ArrowDown'].includes(e.key)) showStrike(index - 1);
-                    }});
-
-                    let touchStartX = 0, touchStartY = 0;
-                    let touchEndX = 0, touchEndY = 0;
-
-                    function handleSwipe() {{
-                        const dx = touchEndX - touchStartX;
-                        const dy = touchEndY - touchStartY;
-                        if (Math.abs(dx) > Math.abs(dy)) {{
-                            if (dx > 30) showStrike(index - 1);
-                            else if (dx < -30) showStrike(index + 1);
-                        }} else {{
-                            if (dy > 30) showStrike(index - 1);
-                            else if (dy < -30) showStrike(index + 1);
-                        }}
-                    }}
-
-                    img.addEventListener('touchstart', (e) => {{
-                        const t = e.changedTouches[0];
-                        touchStartX = t.screenX;
-                        touchStartY = t.screenY;
-                    }}, {{ passive: true }});
-
-                    img.addEventListener('touchend', (e) => {{
-                        const t = e.changedTouches[0];
-                        touchEndX = t.screenX;
-                        touchEndY = t.screenY;
-                        handleSwipe();
-                    }}, {{ passive: true }});
-                </script>
-            </body>
-        </html>
-        """
-        return html
+        return request.make_response(png_data, headers=headers)

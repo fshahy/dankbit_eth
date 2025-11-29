@@ -15,12 +15,6 @@
                             <field name="to_price" placeholder="To Price"/>
                         </setting>
                         <setting>
-                            <field name="zone_from_price" placeholder="Day From Price"/>
-                        </setting>
-                        <setting>
-                            <field name="zone_to_price" placeholder="Day To Price"/>
-                        </setting>
-                        <setting>
                             <field name="steps" placeholder="Steps"/>
                         </setting>
                         <setting>
@@ -28,9 +22,6 @@
                         </setting>
                         <setting>
                             <field name="from_days_ago"/>
-                        </setting>
-                        <setting>
-                            <field name="show_red_line" placeholder="Show Red Line"/>
                         </setting>
                         <setting>
                             <field name="last_hedging_time" placeholder="Last Hedging Time"/>

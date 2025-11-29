@@ -28,18 +28,18 @@ class PlotWizard(models.TransientModel):
         if active_ids and active_model:
             res["dankbit_view_type"] = self.env.context["dankbit_view_type"]
             records = self.env[active_model].browse(active_ids)
-            png_data = self._plot_be_taker(records, res["dankbit_view_type"])
+            png_data = self._plot(records, res["dankbit_view_type"])
             res["image_png"] = base64.b64encode(png_data)
 
         return res
     
-    def _plot_be_taker(self, trades, dankbit_view_type):
+    def _plot(self, trades, dankbit_view_type):
+        plot_title = f"{dankbit_view_type}"
         icp = self.env['ir.config_parameter'].sudo()
 
         day_from_price = float(icp.get_param("dankbit.from_price", default=1500))
         day_to_price = float(icp.get_param("dankbit.to_price", default=3500))
         steps = int(icp.get_param("dankbit.steps", default=10))
-        show_red_line = icp.get_param("dankbit.show_red_line")
 
         index_price = self.env['dankbit.trade'].sudo().get_index_price()
         obj = options.OptionStrat("instrument", index_price, day_from_price, day_to_price, steps)
@@ -72,7 +72,7 @@ class PlotWizard(models.TransientModel):
             elif view_type == 'be_mm':
                 view_type = 'mm'
 
-        fig, _ = obj.plot(index_price, market_deltas, market_gammas, view_type, show_red_line, width=18, height=8)
+        fig, _ = obj.plot(index_price, market_deltas, market_gammas, view_type, plot_title)
         
         buf = BytesIO()
         fig.savefig(buf, format="png")

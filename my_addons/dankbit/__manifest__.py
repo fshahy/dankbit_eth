@@ -1,8 +1,8 @@
 # -*- coding: utf-8 -*-
 {
-    "name": "Dankbit",
+    "name": "Dankbit ETH",
     "version": "0.1",
-    "category": "Options Greeks",
+    "category": "Options Greeks for ETH",
     "author": "Farid Shahy <fshahy@gmail.com>",
     "summary": "",
     "description": "",
@@ -14,7 +14,6 @@
         "security/ir.model.access.csv",
         "views/res_config_settings_views.xml",
         "views/trade_views.xml",
-        "views/screenshot_views.xml",
         "views/help_templates.xml",
         "wizard/plot_wizard_view.xml",
     ],

@@ -55,6 +55,16 @@ class Trade(models.Model):
         string="Days to Expiry",
         compute="_compute_days_to_expiry"
     )
+    block_trade_id = fields.Char(
+        string="Block Trade ID",
+        help="Deribit-assigned ID if this trade was executed as a block trade."
+    )
+
+    is_block_trade = fields.Boolean(
+        string="Is Block Trade",
+        default=False,
+        help="True if this trade came from a Deribit block trade event."
+    )
 
     @api.depends('expiration')
     def _compute_days_to_expiry(self):
@@ -264,6 +274,13 @@ class Trade(models.Model):
             deribit_str = datetime.fromtimestamp(trade["timestamp"]/1000).strftime('%Y-%m-%d %H:%M:%S')
             exp_str = datetime.fromtimestamp(expiration_ts/1000).strftime('%Y-%m-%d %H:%M:%S') if expiration_ts else False
 
+        block_trade_id = trade.get("block_trade_id")
+        is_block_trade = (
+            trade.get("is_block_trade")
+            or trade.get("block_trade")
+            or bool(block_trade_id)
+        )
+
         vals = {
             "name": trade.get("instrument_name"),
             "iv": trade.get("iv"),
@@ -277,6 +294,8 @@ class Trade(models.Model):
             "contracts": trade.get("contracts", trade.get("amount")),
             "deribit_ts": deribit_str,
             "expiration": exp_str,
+            "is_block_trade": is_block_trade,
+            "block_trade_id": block_trade_id if block_trade_id else None,
         }
         self.env["dankbit.trade"].create(vals)
         _logger.info('*** Trade Created: %s (trade_id=%s) ***',
@@ -301,53 +320,6 @@ class Trade(models.Model):
         instrument = f"ETH-{tomorrow.day}{tomorrow.strftime('%b').upper()}{tomorrow.strftime('%y')}"
         return instrument
 
-    # run by scheduled action
-    def _take_screenshot(self):
-        eth_today = self.get_eth_option_name_for_today()
-
-        icp = self.env['ir.config_parameter'].sudo()
-        try:
-            base_url = icp.get_base_url()
-        except Exception:
-            base_url = icp.get_param('web.base.url', default='http://localhost:8069')
-
-        full_url = f"{base_url.rstrip('/')}/{eth_today}/mm/y"
-        _logger.info("Taking screenshot using URL: %s", full_url)
-
-        try:
-            timeout = float(icp.get_param('dankbit.screenshot_timeout', default=3.0))
-        except Exception:
-            timeout = 3.0
-
-        try:
-            response = requests.get(full_url, timeout=timeout)
-            response.raise_for_status()
-            self.env.cr.commit()
-            _msg = f"✅ Called {full_url} — {response.status_code}"
-        except requests.exceptions.SSLError as e:
-            _logger.warning("SSL error when calling %s: %s — retrying with verify=False", full_url, e)
-            try:
-                response = requests.get(full_url, timeout=timeout, verify=False)
-                response.raise_for_status()
-                self.env.cr.commit()
-                _msg = f"✅ Called {full_url} (insecure) — {response.status_code}"
-            except Exception as e2:
-                _msg = f"❌ Error calling {full_url} (insecure retry): {e2}"
-        except Exception as e:
-            _msg = f"❌ Error calling {full_url}: {e}"
-
-        self.env['ir.logging'].sudo().create({
-            'name': 'Dankbit Screenshot Taker',
-            'type': 'server',
-            'dbname': self._cr.dbname,
-            'level': 'info',
-            'message': _msg,
-            'path': __name__,
-            'func': '_take_screenshot',
-            'line': '0',
-        })
-        return True
-
     def open_plot_wizard_taker(self):
         return {
             "type": "ir.actions.act_window",
@@ -371,12 +343,3 @@ class Trade(models.Model):
                 "dankbit_view_type": "be_mm",
             }
         }
-
-class DankbitScreenshot(models.Model):
-    _name = "dankbit.screenshot"
-    _description = "Dankbit Screenshot"
-    _order = "timestamp asc"
-
-    name = fields.Char(required=True)
-    timestamp = fields.Datetime(string="Timestamp", default=lambda self: fields.Datetime.now())
-    image_png = fields.Binary(string="Chart Image", attachment=True)

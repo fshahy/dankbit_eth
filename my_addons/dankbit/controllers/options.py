@@ -81,8 +81,8 @@ class OptionStrat:
         for _ in range(Q):
             self.instruments.append(o)
 
-    def plot(self, index_price, market_delta, market_gammas, view_type, show_red_line, strike=None, width=18, height=8):
-        fig, ax = plt.subplots(figsize=(width, height))
+    def plot(self, index_price, market_delta, market_gammas, view_type, plot_title):
+        fig, ax = plt.subplots(figsize=(18, 8))
         ax.xaxis.set_major_locator(MultipleLocator(50))  # Tick every 50
         plt.xticks(rotation=90) 
         plt.yticks(list(range(-50000, 50001, 1000))) 
@@ -143,33 +143,21 @@ class OptionStrat:
             payoff_scaled = self.payoffs
 
         if view_type == "mm": # for market maker
-            if show_red_line:
-                ax.plot(self.STs, payoff_scaled, color="red", label="Taker P&L")
             ax.plot(self.STs, -md_plot, color="green", label="Delta")
             ax.plot(self.STs, -mg_plot, color="violet", label="Gamma")
         elif view_type == "taker":
-            if show_red_line:
-                ax.plot(self.STs, payoff_scaled, color="red", label="P&L")
             ax.plot(self.STs, md_plot, color="green", label="Delta")
             ax.plot(self.STs, mg_plot, color="violet", label="Gamma")
         elif view_type == "be_taker":
-            if show_red_line:
-                ax.plot(self.STs, payoff_scaled, color="red", label="P&L")
+            ax.plot(self.STs, payoff_scaled, color="red", label="P&L")
             ax.plot(self.STs, md_plot, color="green", label="Delta")
             ax.plot(self.STs, mg_plot, color="violet", label="Gamma")
         elif view_type == "be_mm":
-            if show_red_line:
-                ax.plot(self.STs, payoff_scaled, color="red", label="Taker P&L")
+            ax.plot(self.STs, payoff_scaled, color="red", label="Taker P&L")
             ax.plot(self.STs, -md_plot, color="green", label="Delta")
             ax.plot(self.STs, -mg_plot, color="violet", label="Gamma")
 
-        if strike is not None and isinstance(strike, str):
-            view_type = strike
-        if strike is not None and isinstance(strike, (int, float)):
-            ax.axvline(x=strike, color="orange")
-            view_type = f"MM Strike {strike}"
-
-        ax.set_title(f"{self.name} | {now} | {view_type}")
+        ax.set_title(f"{self.name} | {now} | {plot_title}")
 
         ymax = np.max(np.abs(plt.ylim()))
         plt.ylim(-ymax, ymax)
@@ -197,54 +185,7 @@ class OptionStrat:
         plt.show()
 
         return fig,ax
-
-    def plot_zones(self, index_price):
-        fig, ax = plt.subplots(figsize=(18, 8))
-        ax.xaxis.set_major_locator(MultipleLocator(25))  # Tick every 25
-        plt.xticks(rotation=90) 
-        ax.grid(True)
-
-        berlin_time = datetime.now(ZoneInfo("Europe/Berlin"))
-        now = berlin_time.strftime("%Y-%m-%d %H:%M")
-
-        ax.plot(self.STs, self.longs, color="green", label="Longs")
-        ax.plot(self.STs, self.shorts, color="red", label="Shorts")
-
-        ax.set_title(f"{self.name} | {now} | Zones")
-        ax.axhline(0, color='black', linewidth=1, linestyle='-')
-        ax.axvline(x=index_price, color="blue")
-        ax.set_xlabel(f"${self.S0:,.0f}", fontsize=10, color="blue")
-        legend = plt.legend()
-        self.add_dankbit_signature(ax)
-        plt.show()
-
-        return fig, ax
-    
-    def plot_oi(self, index_price, oi_data, plot_title):
-        fig, ax = plt.subplots(figsize=(18, 8))
-        ax.xaxis.set_major_locator(MultipleLocator(25))  # Tick every 25
-        plt.xticks(rotation=90) 
-        ax.grid(True)
-
-        # place signature after plotting bars so it can choose a clean area
         
-        berlin_time = datetime.now(ZoneInfo("Europe/Berlin"))
-        now = berlin_time.strftime("%Y-%m-%d %H:%M")
-
-        for oi in oi_data:
-            plt.bar(float(oi[0]) - 5, float(oi[1]), width=10, color='green')
-            plt.bar(float(oi[0]) + 5, float(oi[2]), width=10, color='red')
-
-        ax.set_title(f"{self.name} | {now} | {plot_title}")
-        ax.axhline(0, color='black', linewidth=1, linestyle='-')
-        ax.axvline(x=index_price, color="blue")
-        ax.set_xlabel(f"${self.S0:,.0f}", fontsize=10, color="blue")
-        # no legend here by default, but keep signature placement logic
-        self.add_dankbit_signature(ax)
-        plt.show()
-
-        return fig
-            
     def add_dankbit_signature(self, ax, logo_path=None, alpha=0.5, fontsize=16, trade_count=None):
         """
         Legend stays top-right.
