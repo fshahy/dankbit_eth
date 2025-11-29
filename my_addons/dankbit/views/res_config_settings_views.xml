@@ -1,0 +1,57 @@
+<odoo>
+
+    <record id="res_config_settings_view_form_inherit_dankbit" model="ir.ui.view">
+        <field name="name">res.config.settings.inherit.dankbit</field>
+        <field name="model">res.config.settings</field>
+        <field name="inherit_id" ref="base.res_config_settings_view_form"/>
+        <field name="arch" type="xml">
+            <xpath expr="//form" position="inside">
+                 <app data-string="Dankbit" string="Dankbit" name="dankbit_settings">
+                    <block title="Graph Setting" id="dankbit_graph_settings" groups="base.group_no_one">
+                        <setting>
+                            <field name="from_price" placeholder="From Price"/>
+                        </setting>
+                        <setting>
+                            <field name="to_price" placeholder="To Price"/>
+                        </setting>
+                        <setting>
+                            <field name="zone_from_price" placeholder="Day From Price"/>
+                        </setting>
+                        <setting>
+                            <field name="zone_to_price" placeholder="Day To Price"/>
+                        </setting>
+                        <setting>
+                            <field name="steps" placeholder="Steps"/>
+                        </setting>
+                        <setting>
+                            <field name="refresh_interval" placeholder="Refresh Interval"/>
+                        </setting>
+                        <setting>
+                            <field name="from_days_ago"/>
+                        </setting>
+                        <setting>
+                            <field name="show_red_line" placeholder="Show Red Line"/>
+                        </setting>
+                        <setting>
+                            <field name="last_hedging_time" placeholder="Last Hedging Time"/>
+                        </setting>
+                        <setting>
+                            <field name="gamma_plot_scale" placeholder="Gamma plot scale (0=auto)"/>
+                        </setting>
+                        <setting>
+                            <field name="deribit_timeout" placeholder="Deribit API timeout (s)"/>
+                        </setting>
+                        <setting>
+                            <field name="deribit_cache_ttl" placeholder="Deribit cache TTL (s)"/>
+                        </setting>
+                        <setting>
+                            <field name="mock_0dte" placeholder="Mock 0DTE"/>
+                        </setting>
+                    </block>
+
+                 </app>
+            </xpath>
+        </field>
+    </record>
+
+</odoo>
